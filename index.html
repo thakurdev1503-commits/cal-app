@@ -853,6 +853,10 @@
       <h2 style="margin-bottom:10px;">Scan barcode</h2>
       <video id="cameraVideo" playsinline autoplay muted style="width:100%; border-radius:var(--radius-md); background:#000;"></video>
       <div class="auth-error" id="cameraError" style="margin-top:10px;"></div>
+      <div style="display:flex; gap:8px; margin-top:12px;">
+        <input type="text" inputmode="numeric" id="camManual" placeholder="Or type the barcode number" autocomplete="off" style="flex:1; min-width:0;">
+        <button class="btn-cancel" id="camManualBtn" style="white-space:nowrap;">Look up</button>
+      </div>
       <div class="modal-actions">
         <button class="btn-cancel" id="cameraCloseBtn">Close</button>
       </div>
@@ -2200,15 +2204,35 @@
   document.getElementById('productQty').addEventListener('input', updateProductTotals);
 
   // ---- Database mode: barcode lookup ----
+  // GS1 check digit (EAN-8 / UPC-A / EAN-13 / GTIN-14). Catches mistyped numbers before we hit the network.
+  function validBarcode(code){
+    if(!/^\d+$/.test(code) || ![8,12,13,14].includes(code.length)) return false;
+    const d = code.split('').map(Number), check = d.pop();
+    let sum = 0;
+    for(let i = d.length - 1, w = 3; i >= 0; i--, w = (w === 3 ? 1 : 3)) sum += d[i] * w;
+    return (10 - (sum % 10)) % 10 === check;
+  }
   document.getElementById('barcodeLookupBtn').addEventListener('click', ()=> lookupBarcode(document.getElementById('barcodeInput').value.trim()));
+  document.getElementById('barcodeInput').addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); lookupBarcode(e.target.value.trim()); } });
   async function lookupBarcode(code){
+    code = String(code || '').replace(/\s+/g, '');
     if(!code) return;
+    if(!validBarcode(code)){
+      addMsg.className='add-msg error';
+      addMsg.textContent = "That number doesn't look like a valid barcode. Check the digits (usually 8 or 13) and try again.";
+      return;
+    }
     addMsg.className='add-msg loading'; addMsg.textContent='Looking up barcode…';
     try{
-      const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json`);
-      const data = await res.json();
+      const ctrl = new AbortController();
+      const t = setTimeout(()=> ctrl.abort(), 15000);
+      let data;
+      try{
+        const res = await fetch(`https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json`, { signal: ctrl.signal });
+        data = await res.json();
+      } finally { clearTimeout(t); }
       if(data.status !== 1 || !data.product){
-        addMsg.className='add-msg error'; addMsg.textContent='No product found for that barcode.';
+        addMsg.className='add-msg error'; addMsg.textContent='No product found for that barcode. Try searching by name instead.';
         return;
       }
       const p = data.product;
@@ -2216,54 +2240,115 @@
         p.nutriments['energy-kcal_100g'] = Number(p.nutriments['energy_100g']) / 4.184;
       }
       if(!p.nutriments || p.nutriments['energy-kcal_100g'] == null){
-        addMsg.className='add-msg error'; addMsg.textContent='Found the product but nutrition data is missing.';
+        addMsg.className='add-msg error'; addMsg.textContent='Found the product but nutrition data is missing. Try searching by name or use text mode.';
         return;
       }
       selectProduct({ product_name: p.product_name || 'Unnamed product', nutriments: p.nutriments, serving_size: p.serving_size, brands: p.brands });
       addMsg.textContent=''; addMsg.className='add-msg';
     } catch(e){
-      addMsg.className='add-msg error'; addMsg.textContent='Lookup failed — check your connection.';
+      addMsg.className='add-msg error';
+      addMsg.textContent = e.name === 'AbortError' ? 'The food database is slow right now. Please try again.' : 'Lookup failed. Check your connection.';
     }
   }
 
-  // ---- Database mode: camera barcode scan (progressive enhancement) ----
+  // ---- Database mode: camera barcode scan ----
+  // 1) Native BarcodeDetector (Chrome/Android). 2) ZXing fallback (iPhone Safari, Firefox, desktop). 3) Manual number box.
   document.getElementById('scanCameraBtn').addEventListener('click', openCameraScan);
   document.getElementById('cameraCloseBtn').addEventListener('click', closeCameraScan);
+  const camManual = document.getElementById('camManual');
+  function submitCamManual(){
+    const code = camManual.value.trim();
+    if(!code) return;
+    if(!validBarcode(code.replace(/\s+/g,''))){
+      document.getElementById('cameraError').textContent = "That doesn't look like a valid barcode number. Check the digits.";
+      return;
+    }
+    closeCameraScan();
+    document.getElementById('barcodeInput').value = code;
+    lookupBarcode(code);
+  }
+  document.getElementById('camManualBtn').addEventListener('click', submitCamManual);
+  camManual.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); submitCamManual(); } });
+
+  let zxingReader = null, zxingLoading = null;
+  function loadScript(src, ms){
+    return new Promise((resolve, reject)=>{
+      const el = document.createElement('script');
+      const timer = setTimeout(()=>{ el.remove(); reject(new Error('timeout')); }, ms || 12000);
+      el.src = src; el.async = true;
+      el.onload = ()=>{ clearTimeout(timer); resolve(); };
+      el.onerror = ()=>{ clearTimeout(timer); el.remove(); reject(new Error('load')); };
+      document.head.appendChild(el);
+    });
+  }
+  function loadZXing(){
+    if(window.ZXing) return Promise.resolve();
+    if(!zxingLoading){
+      zxingLoading = loadScript('https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js')
+        .catch(()=> loadScript('https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js'))
+        .then(()=>{ if(!window.ZXing) throw new Error('missing'); })
+        .catch((e)=>{ zxingLoading = null; throw e; });
+    }
+    return zxingLoading;
+  }
+
+  function onBarcodeFound(code){
+    closeCameraScan();
+    document.getElementById('barcodeInput').value = code;
+    lookupBarcode(code);
+  }
 
   async function openCameraScan(){
     const errEl = document.getElementById('cameraError');
     errEl.textContent = '';
+    camManual.value = '';
     document.getElementById('cameraOverlay').classList.add('open');
-    if(!('BarcodeDetector' in window)){
-      errEl.textContent = "Your browser doesn't support live barcode scanning. Enter the barcode number manually below instead.";
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      errEl.textContent = "This browser can't use the camera here. Type the barcode number below instead.";
       return;
     }
+    const video = document.getElementById('cameraVideo');
+    // 1) Native detector
+    if('BarcodeDetector' in window){
+      try{
+        cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        video.srcObject = cameraStream;
+        const detector = new BarcodeDetector({ formats: ['ean_13','ean_8','upc_a','upc_e'] });
+        const poll = async ()=>{
+          if(!cameraStream) return;
+          try{
+            const barcodes = await detector.detect(video);
+            if(barcodes.length > 0){ onBarcodeFound(barcodes[0].rawValue); return; }
+          } catch(e){ /* keep polling */ }
+          if(cameraStream) requestAnimationFrame(poll);
+        };
+        video.addEventListener('loadedmetadata', ()=> poll(), { once:true });
+        return;
+      } catch(e){
+        errEl.textContent = 'Could not access the camera. Allow camera permission, or type the barcode number below.';
+        return;
+      }
+    }
+    // 2) ZXing fallback
+    errEl.textContent = 'Starting scanner…';
     try{
-      cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-      const video = document.getElementById('cameraVideo');
-      video.srcObject = cameraStream;
-      const detector = new BarcodeDetector({ formats: ['ean_13','ean_8','upc_a','upc_e'] });
-      const poll = async ()=>{
-        if(!cameraStream) return;
-        try{
-          const barcodes = await detector.detect(video);
-          if(barcodes.length > 0){
-            const code = barcodes[0].rawValue;
-            closeCameraScan();
-            document.getElementById('barcodeInput').value = code;
-            lookupBarcode(code);
-            return;
-          }
-        } catch(e){ /* keep polling */ }
-        if(cameraStream) requestAnimationFrame(poll);
-      };
-      video.addEventListener('loadedmetadata', ()=> poll());
+      await loadZXing();
+      if(!document.getElementById('cameraOverlay').classList.contains('open')) return; // closed while loading
+      const hints = new Map();
+      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8, ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E]);
+      zxingReader = new ZXing.BrowserMultiFormatReader(hints, 300);
+      errEl.textContent = '';
+      await zxingReader.decodeFromConstraints({ video: { facingMode: 'environment' } }, video, (result)=>{
+        if(result){ onBarcodeFound(result.getText()); }
+      });
     } catch(e){
-      errEl.textContent = 'Could not access the camera. Check permissions, or enter the barcode manually.';
+      errEl.textContent = "Couldn't start the scanner. Type the barcode number below instead.";
     }
   }
   function closeCameraScan(){
+    if(zxingReader){ try{ zxingReader.reset(); }catch(e){} zxingReader = null; }
     if(cameraStream){ cameraStream.getTracks().forEach(t=>t.stop()); cameraStream = null; }
+    const v = document.getElementById('cameraVideo'); if(v) v.srcObject = null;
     document.getElementById('cameraOverlay').classList.remove('open');
   }
 

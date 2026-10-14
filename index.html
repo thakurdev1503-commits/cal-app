@@ -2116,6 +2116,8 @@
   async function queryFoodSources(query){
     const q = encodeURIComponent(query);
     const sources = [
+      // Indian products first (Open Food Facts country filter)
+      `https://world.openfoodfacts.org/cgi/search.pl?search_terms=${q}&search_simple=1&action=process&json=1&page_size=24&sort_by=unique_scans_n&tagtype_0=countries&tag_contains_0=contains&tag_0=india&fields=code,product_name,brands,nutriments,serving_size`,
       // Newer, faster search service
       `https://search.openfoodfacts.org/search?q=${q}&page_size=24&fields=code,product_name,brands,nutriments,serving_size`,
       // Classic endpoint, sorted by most-scanned so common products come first
@@ -2134,27 +2136,191 @@
     return [];
   }
 
+  // ---- Built-in Indian food list (per 100 g, as eaten). Typical values; shown as "approx." ----
+  // [name, search aliases, kcal, protein, carbs, fat, serving g, serving label]
+  const INDIAN_FOODS = [
+    ['Roti / Chapati (plain)','phulka rotli chapathi',297,9.6,55,3.7,40,'1 roti'],
+    ['Phulka (no oil)','roti chapati',265,9,52,1.5,30,'1 phulka'],
+    ['Paratha (plain, with ghee)','parantha',326,7.5,45,13,80,'1 paratha'],
+    ['Aloo paratha','potato stuffed parantha',270,6,38,10.5,100,'1 paratha'],
+    ['Puri','poori',350,7,45,16,30,'1 puri'],
+    ['Naan','butter naan',290,9,50,5,90,'1 naan'],
+    ['Bhatura','bhature',320,7,45,13,100,'1 bhatura'],
+    ['Thepla','methi',320,9,45,12,40,'1 thepla'],
+    ['Khakhra','',380,12,60,9,15,'1 khakhra'],
+    ['Plain dosa','dosai',168,4,29,3.7,120,'1 dosa'],
+    ['Masala dosa','dosai potato',190,4,27,7.5,180,'1 dosa'],
+    ['Idli','idly',135,4,27,0.4,40,'1 idli'],
+    ['Uttapam','oothappam',190,5,30,5,100,'1 uttapam'],
+    ['Upma','rava semolina',150,3.5,22,5.5,200,'1 bowl'],
+    ['Poha','flattened rice beaten',140,2.8,25,3,150,'1 plate'],
+    ['Dhokla','khaman',160,6,25,4,100,'4 pieces'],
+    ['White rice (cooked)','chawal bhat rice steamed',130,2.7,28,0.3,150,'1 cup'],
+    ['Brown rice (cooked)','chawal',112,2.6,23,0.9,150,'1 cup'],
+    ['Jeera rice','cumin chawal',150,3,27,3,150,'1 cup'],
+    ['Veg pulao','pulav rice',150,3,25,4,200,'1 plate'],
+    ['Chicken biryani','briyani',170,8.5,20,6,250,'1 plate'],
+    ['Veg biryani','vegetable briyani',160,3.5,25,5,250,'1 plate'],
+    ['Khichdi','khichri dal rice',120,4,19,3,200,'1 bowl'],
+    ['Curd rice','dahi rice thayir sadam',115,3,18,3,200,'1 bowl'],
+    ['Dal tadka','daal lentil toor arhar',120,6,15,4,150,'1 katori'],
+    ['Dal fry','daal lentil',130,6.5,16,4.5,150,'1 katori'],
+    ['Moong dal (cooked)','mung daal lentil',105,7,18,0.4,150,'1 katori'],
+    ['Dal makhani','daal black lentil',150,6.5,14,8,150,'1 katori'],
+    ['Rajma curry','kidney beans masala',125,6,16,4,150,'1 katori'],
+    ['Chole (chickpea curry)','chana masala chickpeas',150,7,19,5,150,'1 katori'],
+    ['Sambar','sambhar',60,3,9,1.5,150,'1 katori'],
+    ['Palak paneer','spinach cottage cheese',140,7,6,10,150,'1 katori'],
+    ['Paneer (raw)','cottage cheese',265,18,1.2,20.8,100,'100 g'],
+    ['Paneer butter masala','makhani cottage cheese',175,7,8,13,150,'1 katori'],
+    ['Matar paneer','peas cottage cheese',165,7,8,11,150,'1 katori'],
+    ['Shahi paneer','cottage cheese',200,7,9,15,150,'1 katori'],
+    ['Aloo gobi','potato cauliflower sabzi',90,2,10,5,150,'1 katori'],
+    ['Aloo sabzi (dry)','potato sabji',110,2,15,5,150,'1 katori'],
+    ['Bhindi masala','okra ladyfinger sabzi',95,2.2,8,6,150,'1 katori'],
+    ['Baingan bharta','brinjal eggplant aubergine',85,2,8,5,150,'1 katori'],
+    ['Mixed veg curry','sabzi sabji vegetable',85,2.5,9,4.5,150,'1 katori'],
+    ['Chicken curry','murgh masala',150,14,4,9,200,'1 bowl'],
+    ['Butter chicken','murgh makhani',170,12,6,11,200,'1 bowl'],
+    ['Chicken tikka','tandoori kebab',150,22,3,5,100,'4 pieces'],
+    ['Tandoori chicken','murgh',150,24,2,5,150,'1 leg piece'],
+    ['Mutton curry','gosht lamb goat',190,15,4,12,200,'1 bowl'],
+    ['Fish curry','machli',125,13,4,6,150,'1 katori'],
+    ['Prawn curry','shrimp jhinga',110,12,3,5,150,'1 katori'],
+    ['Egg curry','anda masala',140,8,5,10,150,'1 katori'],
+    ['Boiled egg','anda eggs',155,13,1.1,11,50,'1 egg'],
+    ['Omelette','anda egg fried',185,11,1,15,100,'2 egg omelette'],
+    ['Egg bhurji','anda scrambled',170,11,3,13,100,'1 serving'],
+    ['Samosa','',262,4.5,28,15,80,'1 samosa'],
+    ['Pakora / Bhajiya','pakoda bhaji fritters',280,6,25,17,60,'4 pieces'],
+    ['Vada pav','wada',215,5,30,8,140,'1 vada pav'],
+    ['Pav bhaji','',150,4,20,6,250,'1 plate'],
+    ['Bhel puri','bhelpuri chaat',150,3.5,24,4,100,'1 plate'],
+    ['Pani puri','golgappa puchka',180,3,30,5,100,'6 pieces'],
+    ['Instant noodles (dry)','maggi',440,9,62,17,70,'1 packet'],
+    ['Roasted chana','chickpeas bhuna',370,19,58,5,30,'1 handful'],
+    ['Makhana (fox nuts)','phool makhane lotus seeds',347,10,77,0.1,30,'1 bowl'],
+    ['Peanut butter','mungfali sandwich spread',588,25,20,50,32,'2 tbsp'],
+    ['Peanuts (roasted)','mungfali groundnut moongphali',585,26,21,49,30,'1 handful'],
+    ['Almonds','badam',579,21,22,50,28,'~23 almonds'],
+    ['Cashews','kaju',553,18,30,44,28,'1 handful'],
+    ['Walnuts','akhrot',654,15,14,65,28,'~7 halves'],
+    ['Whey protein powder','protein shake supplement',400,80,8,6,30,'1 scoop'],
+    ['Bread (white)','slice sandwich',265,9,49,3.2,30,'1 slice'],
+    ['Bread (brown)','whole wheat slice',250,10,43,3.5,30,'1 slice'],
+    ['Milk (toned)','doodh',58,3.1,4.7,3,200,'1 glass'],
+    ['Milk (full cream, cow)','doodh',67,3.2,4.8,4.1,200,'1 glass'],
+    ['Buffalo milk','doodh',97,3.7,5.2,6.9,200,'1 glass'],
+    ['Curd / Dahi','yogurt yoghurt',61,3.5,4.7,3.3,100,'1 small bowl'],
+    ['Buttermilk / Chaas','chhaas mattha',40,3.3,4.8,1,200,'1 glass'],
+    ['Lassi (sweet)','',90,3,14,2.5,250,'1 glass'],
+    ['Ghee','clarified butter',900,0,0,100,5,'1 tsp'],
+    ['Butter','makhan',717,0.9,0.1,81,10,'1 tsp'],
+    ['Cheese slice','processed',320,20,4,25,20,'1 slice'],
+    ['Masala chai (milk + sugar)','tea',50,1.5,7,1.8,150,'1 cup'],
+    ['Cola','soft drink coke pepsi',42,0,10.6,0,250,'1 glass'],
+    ['Sugar','cheeni',387,0,100,0,5,'1 tsp'],
+    ['Jaggery','gur gud',383,0.4,98,0.1,10,'1 piece'],
+    ['Honey','shahad',304,0.3,82,0,21,'1 tbsp'],
+    ['Banana','kela',89,1.1,23,0.3,100,'1 medium'],
+    ['Apple','seb',52,0.3,14,0.2,180,'1 medium'],
+    ['Mango','aam',60,0.8,15,0.4,200,'1 cup'],
+    ['Orange','santra narangi',47,0.9,12,0.1,130,'1 medium'],
+    ['Papaya','papita',43,0.5,11,0.3,150,'1 cup'],
+    ['Watermelon','tarbooz',30,0.6,7.6,0.2,200,'1 slice'],
+    ['Grapes','angoor',69,0.7,18,0.2,100,'1 bunch'],
+    ['Pomegranate','anar',83,1.7,19,1.2,100,'1/2 fruit'],
+    ['Guava','amrud',68,2.6,14,1,100,'1 medium'],
+    ['Pineapple','ananas',50,0.5,13,0.1,100,'1 slice'],
+    ['Coconut water','nariyal pani',19,0.7,3.7,0.2,250,'1 glass'],
+    ['Potato (boiled)','aloo',87,1.9,20,0.1,100,'1 medium'],
+    ['Sweet potato','shakarkandi',86,1.6,20,0.1,130,'1 medium'],
+    ['Onion','pyaz',40,1.1,9,0.1,100,'1 medium'],
+    ['Tomato','tamatar',18,0.9,3.9,0.2,100,'1 medium'],
+    ['Cucumber','kheera',15,0.7,3.6,0.1,100,'1/2'],
+    ['Carrot','gajar',41,0.9,10,0.2,80,'1 medium'],
+    ['Spinach','palak',23,2.9,3.6,0.4,100,'1 bunch'],
+    ['Gulab jamun','',300,4,45,12,50,'1 piece'],
+    ['Jalebi','',370,2,60,14,50,'2 pieces'],
+    ['Rasgulla','rosogolla',186,4,40,1,60,'1 piece'],
+    ['Besan ladoo','laddu laddoo',430,8,50,22,40,'1 ladoo'],
+    ['Kheer','payasam rice pudding',130,3.5,20,4,150,'1 bowl'],
+    ['Gajar halwa','carrot halwa',200,4,27,9,100,'1 small bowl'],
+    ['Rasmalai','ras malai',195,6,22,9,80,'1 piece'],
+    ['Atta (wheat flour)','whole wheat flour',340,12,71,1.7,40,'for 1 roti'],
+    ['Rice (raw)','chawal basmati',345,6.8,78,0.5,50,'1/4 cup'],
+    ['Toor dal (raw)','arhar lentil',335,22,57,1.5,50,'1/4 cup'],
+    ['Moong dal (raw)','mung lentil',347,24,60,1.2,50,'1/4 cup'],
+    ['Chana dal (raw)','bengal gram lentil',360,21,60,5.6,50,'1/4 cup'],
+    ['Masoor dal (raw)','red lentil',343,25,60,1.1,50,'1/4 cup'],
+    ['Besan (gram flour)','chickpea flour',387,22,58,6.7,30,'1/4 cup'],
+    ['Rolled oats','oatmeal porridge',389,17,66,7,40,'1/2 cup'],
+    ['Soya chunks (dry)','nutrela meal maker',345,52,33,0.5,30,'1 handful'],
+    ['Chicken breast (cooked)','murgh',165,31,0,3.6,100,'1 piece'],
+  ];
+  function searchIndianFoods(query){
+    const toks = query.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    if(!toks.length) return [];
+    const scored = [];
+    INDIAN_FOODS.forEach(f=>{
+      const name = f[0].toLowerCase(), hay = name + ' ' + f[1];
+      if(!toks.every(t => hay.includes(t))) return;
+      let score = 0;
+      toks.forEach(t=>{
+        if(name.startsWith(t)) score += 4;
+        else if(name.split(/[^a-z0-9]+/).some(w => w.startsWith(t))) score += 3;
+        else score += 1;
+      });
+      scored.push({ f, score });
+    });
+    scored.sort((a,b)=> b.score - a.score);
+    return scored.slice(0, 8).map(({f})=>({
+      product_name: f[0], brands: 'Indian staple · approx.',
+      nutriments: { 'energy-kcal_100g': f[2], proteins_100g: f[3], carbohydrates_100g: f[4], fat_100g: f[5] },
+      serving_size: f[6] + ' g (' + f[7] + ')', _local: true
+    }));
+  }
+
+  let searchSeq = 0;
+  function renderProductRows(container, products, label){
+    if(label){
+      const h = document.createElement('div');
+      h.className = 'empty-state'; h.style.cssText = 'padding:10px 0 4px; text-align:left; font-size:11.5px; letter-spacing:.04em; text-transform:uppercase;';
+      h.textContent = label; container.appendChild(h);
+    }
+    products.forEach(p=>{
+      const row = document.createElement('button');
+      row.className = 'db-result';
+      row.innerHTML = `
+        <div style="min-width:0;">
+          <div class="db-result-name">${escapeHtml(p.product_name)}</div>
+          <div class="db-result-brand">${escapeHtml(p.brands || 'Generic')}${p.serving_size ? ' · ' + escapeHtml(String(p.serving_size)) : ''}</div>
+        </div>
+        <div class="db-result-cal">${Math.round(p.nutriments['energy-kcal_100g'])} kcal/100g</div>`;
+      row.addEventListener('click', ()=> selectProduct(p));
+      container.appendChild(row);
+    });
+  }
+
   async function searchFoodDatabase(query){
+    const seq = ++searchSeq;
     const resultsEl = document.getElementById('dbSearchResults');
-    resultsEl.innerHTML = '<div class="empty-state">Searching…</div>';
+    const local = searchIndianFoods(query);
+    resultsEl.innerHTML = '';
+    if(local.length) renderProductRows(resultsEl, local, 'Common Indian foods');
+    const loading = document.createElement('div');
+    loading.className = 'empty-state'; loading.textContent = local.length ? 'Looking for packaged products…' : 'Searching…';
+    resultsEl.appendChild(loading);
     try{
       const products = await queryFoodSources(query);
-      if(products.length === 0){ resultsEl.innerHTML = '<div class="empty-state">No matches. Try a simpler word, or use the Describe tab and let AI estimate it.</div>'; return; }
-      resultsEl.innerHTML = '';
-      products.slice(0,15).forEach(p=>{
-        const row = document.createElement('button');
-        row.className = 'db-result';
-        row.innerHTML = `
-          <div style="min-width:0;">
-            <div class="db-result-name">${escapeHtml(p.product_name)}</div>
-            <div class="db-result-brand">${escapeHtml(p.brands || 'Generic')}</div>
-          </div>
-          <div class="db-result-cal">${Math.round(p.nutriments['energy-kcal_100g'])} kcal/100g</div>`;
-        row.addEventListener('click', ()=> selectProduct(p));
-        resultsEl.appendChild(row);
-      });
+      if(seq !== searchSeq) return;       // a newer search replaced this one
+      loading.remove();
+      if(products.length) renderProductRows(resultsEl, products.slice(0, 12), 'Packaged products');
+      else if(!local.length) resultsEl.innerHTML = '<div class="empty-state">No matches. Try a simpler word, or use the Describe tab and let AI estimate it.</div>';
     } catch(e){
-      resultsEl.innerHTML = '<div class="empty-state">Search failed — check your connection.</div>';
+      if(seq !== searchSeq) return;
+      loading.remove();
+      if(!local.length) resultsEl.innerHTML = '<div class="empty-state">Search failed. Check your connection, or use the Describe tab.</div>';
     }
   }
 

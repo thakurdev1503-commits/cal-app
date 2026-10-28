@@ -586,6 +586,7 @@
 
       <button class="btn-outline" id="goToOnboardingBtn" style="margin-top:16px;">New here? Take the 1-minute setup</button>
 
+      <p style="text-align:center; font-size:11.5px; color:var(--text-faint); margin-top:14px;">By continuing you agree to our <a href="privacy.html" target="_blank" rel="noopener" style="color:var(--accent);">privacy policy</a>.</p>
       <p class="api-base-note">Connected to <code id="apiBaseDisplay">API_BASE</code>. Edit the <code>API_BASE</code> constant near the top of this file's script to point at your deployed backend.</p>
     </div>
   </section>
@@ -970,7 +971,12 @@
         <button class="btn-outline" id="openAdminBtn">View all users' logs</button>
       </div>
       <div class="card">
+        <div class="section-title" style="margin-bottom:8px;">Your data</div>
+        <button class="btn-outline" id="exportDataBtn">Download my data</button>
+        <div class="auth-error" id="exportError" style="margin-top:8px;"></div>
+        <a href="privacy.html" target="_blank" rel="noopener" style="display:block; text-align:center; font-size:12.5px; color:var(--accent); font-weight:600; margin:4px 0 14px;">Privacy policy</a>
         <button class="btn-danger-text" id="resetDataBtn">Delete all my meals</button>
+        <button class="btn-danger-text" id="deleteAccountBtn" style="margin-top:6px;">Delete my account</button>
       </div>
       <div class="card">
         <button class="logout-btn" id="logoutBtn">Log out</button>
@@ -1126,6 +1132,23 @@
       Profile
     </button>
   </nav>
+
+  <!-- ========== DELETE ACCOUNT MODAL ========== -->
+  <div class="overlay" id="deleteAccountOverlay">
+    <div class="modal">
+      <h2>Delete your account?</h2>
+      <p>This permanently deletes your account and everything you've logged: meals, weight, water and workouts. It can't be undone.</p>
+      <div class="field" style="text-align:left;">
+        <label for="deleteAccountPassword">Enter your password to confirm</label>
+        <input type="password" id="deleteAccountPassword" autocomplete="current-password">
+      </div>
+      <div class="auth-error" id="deleteAccountError"></div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="deleteAccountCancel">Cancel</button>
+        <button class="btn-confirm-danger" id="deleteAccountConfirm">Delete forever</button>
+      </div>
+    </div>
+  </div>
 
   <!-- ========== RESET CONFIRM MODAL ========== -->
   <div class="overlay" id="resetOverlay">
@@ -2881,6 +2904,59 @@
     state.offset = 0;
     document.getElementById('resetOverlay').classList.remove('open');
     showScreen('home');
+  });
+
+  // ---------------- DOWNLOAD DATA / DELETE ACCOUNT ----------------
+  document.getElementById('exportDataBtn').addEventListener('click', async ()=>{
+    const btn = document.getElementById('exportDataBtn');
+    const errEl = document.getElementById('exportError');
+    errEl.textContent = '';
+    btn.disabled = true;
+    try{
+      const data = await api('/api/me/export');
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type:'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'cal-my-data.json';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch(e){
+      errEl.textContent = e.message || 'Could not download your data.';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  const delOverlay = document.getElementById('deleteAccountOverlay');
+  document.getElementById('deleteAccountBtn').addEventListener('click', ()=>{
+    document.getElementById('deleteAccountPassword').value = '';
+    document.getElementById('deleteAccountError').textContent = '';
+    delOverlay.classList.add('open');
+  });
+  document.getElementById('deleteAccountCancel').addEventListener('click', ()=> delOverlay.classList.remove('open'));
+  document.getElementById('deleteAccountConfirm').addEventListener('click', async ()=>{
+    const btn = document.getElementById('deleteAccountConfirm');
+    const errEl = document.getElementById('deleteAccountError');
+    const password = document.getElementById('deleteAccountPassword').value;
+    errEl.textContent = '';
+    if(!password){ errEl.textContent = 'Enter your password.'; return; }
+    btn.disabled = true;
+    try{
+      await api('/api/me', { method:'DELETE', body:{ password } });
+      delOverlay.classList.remove('open');
+      state.token = null; state.user = null; state.logs = {}; state.exercise = {}; state.waterCache = {};
+      document.getElementById('auth-email').value = '';
+      document.getElementById('auth-password').value = '';
+      showScreen('auth');
+      document.getElementById('authError').textContent = 'Your account has been deleted.';
+    } catch(e){
+      errEl.textContent = e.message || 'Could not delete your account.';
+    } finally {
+      btn.disabled = false;
+    }
   });
 
   // ---------------- MEAL DETAIL ----------------

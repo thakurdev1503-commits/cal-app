@@ -581,6 +581,7 @@
         <input type="password" id="auth-password" placeholder="8+ characters" autocomplete="current-password">
       </div>
 
+      <div style="text-align:right; margin:-4px 0 6px;"><button id="forgotBtn" style="background:none; border:none; color:var(--accent); font-weight:600; font-size:12.5px; padding:4px 0;">Forgot password?</button></div>
       <div class="auth-error" id="authError" aria-live="polite"></div>
       <button class="btn-primary full" id="authSubmitBtn">Log in</button>
 
@@ -588,6 +589,25 @@
 
       <p style="text-align:center; font-size:11.5px; color:var(--text-faint); margin-top:14px;">By continuing you agree to our <a href="privacy.html" target="_blank" rel="noopener" style="color:var(--accent);">privacy policy</a>.</p>
       <p class="api-base-note">Connected to <code id="apiBaseDisplay">API_BASE</code>. Edit the <code>API_BASE</code> constant near the top of this file's script to point at your deployed backend.</p>
+    </div>
+  </section>
+
+  <!-- ========== RESET PASSWORD (opened from the link in the email) ========== -->
+  <section class="screen" id="screen-reset">
+    <div class="auth-wrap">
+      <div class="wordmark big">cal.</div>
+      <p class="onboard-tag">Choose a new password.</p>
+      <div class="field">
+        <label for="resetPassword">New password</label>
+        <input type="password" id="resetPassword" placeholder="8+ characters" autocomplete="new-password">
+      </div>
+      <div class="field">
+        <label for="resetPassword2">Confirm new password</label>
+        <input type="password" id="resetPassword2" autocomplete="new-password">
+      </div>
+      <div class="auth-error" id="resetError" aria-live="polite"></div>
+      <button class="btn-primary full" id="resetSubmitBtn">Save new password</button>
+      <div class="auth-switch"><button id="resetBackBtn">Back to log in</button></div>
     </div>
   </section>
 
@@ -935,6 +955,14 @@
           </div>
         </div>
       </div>
+      <div class="card" id="verifyCard" style="display:none;">
+        <div class="section-title" style="margin-bottom:6px;">Verify your email</div>
+        <div style="font-size:12.5px; color:var(--text-soft); margin-bottom:10px; line-height:1.5;">
+          We sent a link to <b id="verifyEmailText"></b>. Tap it to confirm your email (check spam too).
+        </div>
+        <button class="btn-outline" id="resendVerifyBtn">Resend verification email</button>
+        <div class="auth-error" id="verifyMsg" style="margin-top:8px;" aria-live="polite"></div>
+      </div>
       <div class="card">
         <div class="goal-row"><span class="goal-row-name">Calories</span><input class="goal-edit-input" id="pgCal" type="number"></div>
         <div class="goal-row"><span class="goal-row-name">Protein (g)</span><input class="goal-edit-input" id="pgProtein" type="number"></div>
@@ -1132,6 +1160,23 @@
       Profile
     </button>
   </nav>
+
+  <!-- ========== FORGOT PASSWORD MODAL ========== -->
+  <div class="overlay" id="forgotOverlay">
+    <div class="modal">
+      <h2>Reset your password</h2>
+      <p>Enter your account email and we'll send you a link to choose a new password.</p>
+      <div class="field" style="text-align:left;">
+        <label for="forgotEmail">Email</label>
+        <input type="email" id="forgotEmail" autocomplete="email">
+      </div>
+      <div class="auth-error" id="forgotMsg" aria-live="polite"></div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="forgotCancel">Close</button>
+        <button class="btn-save" id="forgotSend">Send link</button>
+      </div>
+    </div>
+  </div>
 
   <!-- ========== DELETE ACCOUNT MODAL ========== -->
   <div class="overlay" id="deleteAccountOverlay">
@@ -1338,6 +1383,7 @@
     const email = document.getElementById('auth-email').value.trim();
     const password = document.getElementById('auth-password').value;
     const errEl = document.getElementById('authError');
+    errEl.style.color = '';
     errEl.textContent = '';
     if(!email || !password){ errEl.textContent = 'Email and password are required.'; return; }
 
@@ -2831,6 +2877,9 @@
     const totalMeals = Object.values(state.logs).reduce((s,arr)=>s+arr.length,0);
     document.getElementById('profileMealCount').textContent = `${totalMeals} meal${totalMeals===1?'':'s'} logged`;
     document.getElementById('ownerToolsCard').style.display = state.user.isOwner ? '' : 'none';
+    const vc = document.getElementById('verifyCard');
+    vc.style.display = state.user.emailVerified === false ? '' : 'none';
+    document.getElementById('verifyEmailText').textContent = state.user.email || '';
     const profile = state.user.profile || {};
     document.getElementById('pgStreakNudge').checked = profile.streakNudgeEnabled !== false;
     document.getElementById('pgNotifications').checked = !!profile.notificationsEnabled;
@@ -2904,6 +2953,76 @@
     state.offset = 0;
     document.getElementById('resetOverlay').classList.remove('open');
     showScreen('home');
+  });
+
+  // ---------------- FORGOT / RESET PASSWORD, EMAIL VERIFICATION ----------------
+  const forgotOverlay = document.getElementById('forgotOverlay');
+  document.getElementById('forgotBtn').addEventListener('click', ()=>{
+    document.getElementById('forgotEmail').value = document.getElementById('auth-email').value.trim();
+    document.getElementById('forgotMsg').textContent = '';
+    forgotOverlay.classList.add('open');
+  });
+  document.getElementById('forgotCancel').addEventListener('click', ()=> forgotOverlay.classList.remove('open'));
+  document.getElementById('forgotSend').addEventListener('click', async ()=>{
+    const btn = document.getElementById('forgotSend');
+    const msg = document.getElementById('forgotMsg');
+    const email = document.getElementById('forgotEmail').value.trim();
+    msg.style.color = '';
+    msg.textContent = '';
+    if(!email){ msg.textContent = 'Enter your email address.'; return; }
+    btn.disabled = true;
+    try{
+      await api('/api/auth/forgot', { method:'POST', body:{ email }, auth:false });
+      msg.style.color = 'var(--accent)';
+      msg.textContent = 'If that email has an account, a reset link is on its way. Check your inbox and spam folder.';
+    } catch(e){
+      msg.textContent = e.message || 'Something went wrong.';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  let resetToken = null;
+  document.getElementById('resetBackBtn').addEventListener('click', ()=> showScreen('auth'));
+  document.getElementById('resetSubmitBtn').addEventListener('click', async ()=>{
+    const btn = document.getElementById('resetSubmitBtn');
+    const errEl = document.getElementById('resetError');
+    const p1 = document.getElementById('resetPassword').value;
+    const p2 = document.getElementById('resetPassword2').value;
+    errEl.textContent = '';
+    if(p1.length < 8){ errEl.textContent = 'Use at least 8 characters.'; return; }
+    if(p1 !== p2){ errEl.textContent = "The two passwords don't match."; return; }
+    btn.disabled = true;
+    try{
+      await api('/api/auth/reset', { method:'POST', body:{ token: resetToken, password: p1 }, auth:false });
+      document.getElementById('resetPassword').value = '';
+      document.getElementById('resetPassword2').value = '';
+      showScreen('auth');
+      const a = document.getElementById('authError');
+      a.style.color = 'var(--accent)';
+      a.textContent = 'Password changed. Log in with your new password.';
+    } catch(e){
+      errEl.textContent = e.message || 'Something went wrong.';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  document.getElementById('resendVerifyBtn').addEventListener('click', async ()=>{
+    const btn = document.getElementById('resendVerifyBtn');
+    const msg = document.getElementById('verifyMsg');
+    msg.style.color = '';
+    msg.textContent = '';
+    btn.disabled = true;
+    try{
+      await api('/api/auth/resend-verification', { method:'POST' });
+      msg.style.color = 'var(--accent)';
+      msg.textContent = 'Sent! Check your inbox and spam folder.';
+    } catch(e){
+      msg.textContent = e.message || 'Could not send the email.';
+    } finally {
+      btn.disabled = false;
+    }
   });
 
   // ---------------- DOWNLOAD DATA / DELETE ACCOUNT ----------------
@@ -3213,7 +3332,26 @@
   (async function boot(){
     // hold the splash for a minimum duration so the logo zoom-in is always seen
     await new Promise(resolve => setTimeout(resolve, 1100));
-    showScreen('auth');
+    // Links from emails look like  .../cal-app/?reset=TOKEN  or  .../cal-app/?verify=TOKEN
+    let params = new URLSearchParams(location.search);
+    const rTok = params.get('reset'), vTok = params.get('verify');
+    if(rTok || vTok){ try{ history.replaceState(null, '', location.pathname); }catch(_){} }
+    if(rTok){
+      resetToken = rTok;
+      showScreen('reset');
+    } else {
+      showScreen('auth');
+      if(vTok){
+        const a = document.getElementById('authError');
+        try{
+          await api('/api/auth/verify', { method:'POST', body:{ token: vTok }, auth:false });
+          a.style.color = 'var(--accent)';
+          a.textContent = 'Email verified. You can log in.';
+        } catch(e){
+          a.textContent = e.message || 'That verification link is not valid.';
+        }
+      }
+    }
     const splash = document.getElementById('bootLoading');
     splash.classList.add('fade-out');
     setTimeout(()=>{ splash.style.display = 'none'; }, 450);
